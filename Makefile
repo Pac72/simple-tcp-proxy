@@ -12,4 +12,5 @@ $(PROG).static: $(PROG).o
 .PHONY: clean
 
 clean:
-	-rm $(PROG) $(PROG).o $(PROG).core
+	@find \( -name '*.[oas]' -o -name $(PROG) -o -name core -o -name '*~' \) \
+		-type f -print | xargs rm -f
