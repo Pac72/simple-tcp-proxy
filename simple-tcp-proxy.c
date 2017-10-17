@@ -67,12 +67,12 @@ set_nonblock(int fd)
 	}
 }
 
-
 int
 create_server_sock(char *addr, int port)
 {
 	int addrlen, s, on = 1, x;
 	static struct sockaddr_in client_addr;
+	struct hostent *lhe;
 
 	s = socket(AF_INET, SOCK_STREAM, 0);
 	if (s < 0)
@@ -81,7 +81,10 @@ create_server_sock(char *addr, int port)
 	addrlen = sizeof(client_addr);
 	memset(&client_addr, '\0', addrlen);
 	client_addr.sin_family = AF_INET;
-	client_addr.sin_addr.s_addr = inet_addr(addr);
+	lhe = gethostbyname(addr);
+	if (!lhe)
+		return (-7);
+	memcpy(&client_addr.sin_addr, lhe->h_addr, lhe->h_length);
 	client_addr.sin_port = htons(port);
 	setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, 4);
 	x = bind(s, (struct sockaddr *) &client_addr, addrlen);
