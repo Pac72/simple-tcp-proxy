@@ -3,9 +3,9 @@ CFLAGS=-Wall
 
 all: ${PROG}
 
-$(PROG): $(PROG).o
+simple-tcp-proxy: simple-tcp-proxy.o log.o
 
-$(PROG).static: $(PROG).o
+$(PROG).static: simple-tcp-proxy.o log.o
 	$(CC) -static -o ${@} $(PROG).o
 	strip $@
 

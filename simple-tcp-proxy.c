@@ -29,18 +29,17 @@
 #include <arpa/inet.h>
 #include <arpa/telnet.h>
 
+#include "log.h"
+
 #define FALSE 0
 #define TRUE 1
 
 #define BUF_SIZE 4096
 
-char client_hostname[64];
-int verbosity = 0;
-
 void
 cleanup(int sig)
 {
-	syslog(LOG_NOTICE, "Cleaning up...");
+	linfo("Cleaning up...");
 	exit(0);
 }
 
@@ -61,12 +60,12 @@ set_nonblock(int fd)
 	int x;
 	fl = fcntl(fd, F_GETFL, 0);
 	if (fl < 0) {
-		syslog(LOG_ERR, "fcntl F_GETFL: FD %d: %s", fd, strerror(errno));
+		lerr("fcntl F_GETFL: FD %d: %s", fd, strerror(errno));
 		exit(1);
 	}
 	x = fcntl(fd, F_SETFL, fl | O_NONBLOCK);
 	if (x < 0) {
-		syslog(LOG_ERR, "fcntl F_SETFL: FD %d: %s", fd, strerror(errno));
+		lerr("fcntl F_SETFL: FD %d: %s", fd, strerror(errno));
 		exit(1);
 	}
 }
@@ -98,7 +97,7 @@ create_server_sock(char *addr, int port)
 	x = listen(s, 5);
 	if (x < 0)
 		err(1, "listen %s:%d", addr, port);
-	syslog(LOG_NOTICE, "listening on %s port %d", addr, port);
+	linfo("listening on %s port %d", addr, port);
 
 	return s;
 }
@@ -154,19 +153,19 @@ get_hinfo_from_sockaddr(struct sockaddr_in addr, int len, char *fqdn)
 
 
 int
-wait_for_connection(int s)
+wait_for_connection(int s, char *client_hostname)
 {
 	static int newsock;
 	static socklen_t len;
 	static struct sockaddr_in peer;
 
 	len = sizeof(struct sockaddr);
-	syslog(LOG_INFO, "calling accept FD %d", s);
+	ldebug("calling accept FD %d", s);
 	newsock = accept(s, (struct sockaddr *) &peer, &len);
 	/* dump_sockaddr (peer, len); */
 	if (newsock < 0) {
 		if (errno != EINTR) {
-			syslog(LOG_NOTICE, "accept FD %d: %s", s, strerror(errno));
+			linfo("accept FD %d: %s", s, strerror(errno));
 			return -1;
 		}
 	}
@@ -209,13 +208,13 @@ service_client(int cfd, int sfd)
 		struct timeval to;
 		if (cbo) {
 			if (mywrite(sfd, cbuf, &cbo) < 0 && errno != EWOULDBLOCK) {
-				syslog(LOG_ERR, "write %d: %s", sfd, strerror(errno));
+				lerr("write %d: %s", sfd, strerror(errno));
 				exit(1);
 			}
 		}
 		if (sbo) {
 			if (mywrite(cfd, sbuf, &sbo) < 0 && errno != EWOULDBLOCK) {
-				syslog(LOG_ERR, "write %d: %s", cfd, strerror(errno));
+				lerr("write %d: %s", cfd, strerror(errno));
 				exit(1);
 			}
 		}
@@ -230,33 +229,33 @@ service_client(int cfd, int sfd)
 		if (x > 0) {
 			if (FD_ISSET(cfd, &R)) {
 				n = read(cfd, cbuf+cbo, BUF_SIZE-cbo);
-				syslog(LOG_INFO, "read %d bytes from CLIENT (%d)", n, cfd);
+				ldebug("read %d bytes from CLIENT (%d)", n, cfd);
 				if (n > 0) {
 					cbo += n;
 				} else {
 					close(cfd);
 					close(sfd);
-					syslog(LOG_INFO, "exiting");
+					ldebug("exiting");
 					_exit(0);
 				}
 			}
 			if (FD_ISSET(sfd, &R)) {
 				n = read(sfd, sbuf+sbo, BUF_SIZE-sbo);
-				syslog(LOG_INFO, "read %d bytes from SERVER (%d)", n, sfd);
+				ldebug("read %d bytes from SERVER (%d)", n, sfd);
 				if (n > 0) {
 					sbo += n;
 				} else {
 					close(sfd);
 					close(cfd);
-					syslog(LOG_INFO, "exiting");
+					ldebug("exiting");
 					_exit(0);
 				}
 			}
 		} else if (x < 0 && errno != EINTR) {
-			syslog(LOG_NOTICE, "select: %s", strerror(errno));
+			linfo("select: %s", strerror(errno));
 			close(sfd);
 			close(cfd);
-			syslog(LOG_NOTICE, "exiting");
+			linfo("exiting");
 			_exit(0);
 		}
 	}
@@ -266,6 +265,7 @@ service_client(int cfd, int sfd)
 int
 main(int argc, char *argv[])
 {
+	char client_hostname[256];
 	char *localaddr = NULL;
 	int localport = -1;
 	char *remoteaddr = NULL;
@@ -275,19 +275,41 @@ main(int argc, char *argv[])
 	int master_sock = -1;
 	int print_help = FALSE;
 	int cc;
+	LogLevel logLevel = LLERR;
+	LogTarget logTarget = LTSTDERR;
 
-	while ((cc = getopt(argc, argv, "hv")) != -1) {
+	while (!print_help && (cc = getopt(argc, argv, "hl:t:")) != -1) {
 		switch (cc) {
 			case 'h':
 				print_help = TRUE;
 				break;
 
-			case 'v':
-				verbosity++;
+			case 'l':
+				logLevel = atoi(optarg);
+				break;
+
+			case 't':
+				if (strcmp(optarg, "none") == 0) {
+					logTarget = LTNONE;
+				} else if (strcmp(optarg, "stdout") == 0) {
+					logTarget = LTSTDOUT;
+				} else if (strcmp(optarg, "stderr") == 0) {
+					logTarget = LTSTDERR;
+				} else if (strcmp(optarg, "syslog") == 0) {
+					logTarget = LTSYSLOG;
+				} else {
+					fprintf(stderr, "Unknown log target '%s'\n", optarg);
+					print_help = TRUE;
+					break;
+				}
 				break;
 
 			case '?':
-				fprintf(stderr, "Invalid option '-%c'\n", optopt);
+				if ('l' == optopt || 't' == optopt) {
+					fprintf(stderr, "Option -%c requires an argument\n", optopt);
+				} else {
+					fprintf(stderr, "Invalid option '-%c'\n", optopt);
+				}
 				print_help = TRUE;
 				break;
 
@@ -302,7 +324,12 @@ main(int argc, char *argv[])
 	}
 
 	if (print_help) {
-		fprintf(stderr, "Usage: %s [-h] [-v] laddr lport rhost rport\n", argv[0]);
+		fprintf(stderr, "Usage: %s [options] laddr lport rhost rport\n", argv[0]);
+		fprintf(stderr, "Options:\n"
+						"        -h          help\n"
+						"        -t target   log target (none, stdout, stderr, syslog)\n"
+						"        -l level    log level (0..5, 0: FATAL, 5: TRACE)\n"
+						);
 		exit(1);
 	}
 
@@ -316,14 +343,19 @@ main(int argc, char *argv[])
 	assert(remoteaddr);
 	assert(remoteport > 0);
 
-	openlog(argv[0], LOG_PID, LOG_LOCAL4);
+	set_log_level(logLevel);
+	set_log_target(logTarget);
+
+	if (LTSYSLOG == logTarget) {
+		openlog(argv[0], LOG_PID, LOG_LOCAL4);
+	}
 
 	signal(SIGINT, cleanup);
 	signal(SIGCHLD, sigreap);
 
 	master_sock = create_server_sock(localaddr, localport);
 	for (;;) {
-		if ((client = wait_for_connection(master_sock)) < 0)
+		if ((client = wait_for_connection(master_sock, client_hostname)) < 0)
 			continue;
 		if ((server = open_remote_host(remoteaddr, remoteport)) < 0) {
 			close(client);
@@ -332,8 +364,8 @@ main(int argc, char *argv[])
 		}
 		if (0 == fork()) {
 			/* child */
-			syslog(LOG_NOTICE, "connection from %s fd=%d", client_hostname, client);
-			syslog(LOG_INFO, "connected to %s:%d fd=%d", remoteaddr, remoteport, server);
+			linfo("connection from %s fd=%d", client_hostname, client);
+			ldebug("connected to %s:%d fd=%d", remoteaddr, remoteport, server);
 			close(master_sock);
 			service_client(client, server);
 			abort();
