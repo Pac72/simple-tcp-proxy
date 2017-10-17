@@ -29,9 +29,13 @@
 #include <arpa/inet.h>
 #include <arpa/telnet.h>
 
+#define FALSE 0
+#define TRUE 1
+
 #define BUF_SIZE 4096
 
 char client_hostname[64];
+int verbosity = 0;
 
 void
 cleanup(int sig)
@@ -269,16 +273,43 @@ main(int argc, char *argv[])
 	int client = -1;
 	int server = -1;
 	int master_sock = -1;
+	int print_help = FALSE;
+	int cc;
 
-	if (5 != argc) {
-		fprintf(stderr, "usage: %s laddr lport rhost rport\n", argv[0]);
+	while ((cc = getopt(argc, argv, "hv")) != -1) {
+		switch (cc) {
+			case 'h':
+				print_help = TRUE;
+				break;
+
+			case 'v':
+				verbosity++;
+				break;
+
+			case '?':
+				fprintf(stderr, "Invalid option '-%c'\n", optopt);
+				print_help = TRUE;
+				break;
+
+			default:
+				abort();
+		}
+	}
+
+	if (!print_help && argc - optind != 4) {
+		fprintf(stderr, "Wrong number of arguments\n");
+		print_help = TRUE;
+	}
+
+	if (print_help) {
+		fprintf(stderr, "Usage: %s [-h] [-v] laddr lport rhost rport\n", argv[0]);
 		exit(1);
 	}
 
-	localaddr = strdup(argv[1]);
-	localport = atoi(argv[2]);
-	remoteaddr = strdup(argv[3]);
-	remoteport = atoi(argv[4]);
+	localaddr = strdup(argv[optind]);
+	localport = atoi(argv[optind + 1]);
+	remoteaddr = strdup(argv[optind + 2]);
+	remoteport = atoi(argv[optind + 3]);
 
 	assert(localaddr);
 	assert(localport > 0);
