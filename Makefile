@@ -10,7 +10,7 @@ $(PROG).static: $(PROG).o
 	$(CC) -static -o ${@} $(PROG).o
 	strip $@
 
+.PHONY: clean
+
 clean:
-	rm -f $(PROG)
-	rm -f $(PROG).o
-	rm -f $(PROG).core
+	-rm $(PROG) $(PROG).o $(PROG).core
